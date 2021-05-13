@@ -5,13 +5,10 @@
 #include <Adafruit_MCP23017.h>
 #include "WiFi.h"
 #include "PubSubClient.h" //pio lib install "knolleary/PubSubClient"
-
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
-
 //LCD constants
 const int LCD_NB_ROWS = 2;
 const int LCD_NB_COLUMNS = 16;
-
 //Mqtt constants
 #define SSID "NETGEAR68"
 #define PWD "excitedtuba713"
@@ -20,15 +17,13 @@ const int LCD_NB_COLUMNS = 16;
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-//long lastMsg = 0;
 char msg[50];
 unsigned long lastMillis = 0;
 unsigned long currentMillis = 0;
-int value = 0;
-static int oefeningNmr;
-int cijferSlotnummer = esp_random() % 9;
-static byte percent = 0;
-static int stap = 2; //stapgrootte waarme batterij stijgt
+static int oefeningNmr = 0;
+static int cijferSlotnummer = esp_random() % 9;
+static byte percent = 0; // percentage van de batterij
+static int stap = 2;     //stapgrootte waarme batterij stijgt
 static boolean oefeningJuist = false;
 static boolean pauze = false; //boolean voor Afstand en ontsmetting.(false=> alles kan door gaan/True batterij wordt niet opgeladen)
 static boolean toestandVerzonden = false;
@@ -45,7 +40,6 @@ byte DIV_0_OF_5[8] = {
     B00000,
     B00000,
     B00000}; // 0 / 5
-
 byte DIV_1_OF_5[8] = {
     B10000,
     B10000,
@@ -55,7 +49,6 @@ byte DIV_1_OF_5[8] = {
     B10000,
     B10000,
     B10000}; // 1 / 5
-
 byte DIV_2_OF_5[8] = {
     B11000,
     B11000,
@@ -65,7 +58,6 @@ byte DIV_2_OF_5[8] = {
     B11000,
     B11000,
     B11000}; // 2 / 5
-
 byte DIV_3_OF_5[8] = {
     B11100,
     B11100,
@@ -75,7 +67,6 @@ byte DIV_3_OF_5[8] = {
     B11100,
     B11100,
     B11100}; // 3 / 5
-
 byte DIV_4_OF_5[8] = {
     B11110,
     B11110,
@@ -85,7 +76,6 @@ byte DIV_4_OF_5[8] = {
     B11110,
     B11110,
     B11110}; // 4 / 5
-
 byte DIV_5_OF_5[8] = {
     B11111,
     B11111,
@@ -95,7 +85,6 @@ byte DIV_5_OF_5[8] = {
     B11111,
     B11111,
     B11111}; // 5 / 5
-
 void setup_progressbar()
 {
   lcd.createChar(0, DIV_0_OF_5);
@@ -105,21 +94,19 @@ void setup_progressbar()
   lcd.createChar(4, DIV_4_OF_5);
   lcd.createChar(5, DIV_5_OF_5);
 }
-void draw_progressbar(byte percent)
+void draw_progressbar(byte percent) //batterij, reeks.. en boodschap printen
 {
   //Oef en boodschap weergeven
   lcd.setCursor(0, 0);
   lcd.print("reeks");
   lcd.print(oefeningNmr);
-  lcd.setCursor(8, 0);
+  lcd.setCursor(7, 0);
   lcd.print(boodschapLCD);
   lcd.setCursor(0, 1);
   byte nb_columns = map(percent, 0, 100, 0, LCD_NB_COLUMNS * 5);
-
   //Elke kararkter tekenen voor elke kollom
   for (byte i = 0; i < LCD_NB_COLUMNS; ++i)
   {
-
     if (nb_columns == 0)
     { // Leeg geval
       lcd.write((byte)0);
@@ -136,7 +123,6 @@ void draw_progressbar(byte percent)
     }
   }
 }
-
 //methodes voor wifi
 void callback(char *topic, byte *message, unsigned int length);
 
@@ -145,30 +131,33 @@ void setup_wifi()
 {
   delay(10);
   Serial.println("Connecting to WiFi..");
-
   WiFi.begin(SSID, PWD);
-
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
     Serial.print(".");
   }
-
   Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 }
-
 // callback function, only used when receiving messages
 void callback(char *topic, byte *message, unsigned int length)
 {
   String messageTemp;
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
 
   if (String(topic) == "esp32/fitness/nmrOef")
   {
     oefeningNmr = messageTemp.toInt();
     draw_progressbar(percent);
+    //Serial.print(oefeningNmr);
   }
 
   if (String(topic) == "esp32/fitness/control")
@@ -186,26 +175,36 @@ void callback(char *topic, byte *message, unsigned int length)
     //'0'=RESET
     else if (messageTemp == "0")
     {
-      setup();
+      //setup();
+      ESP.restart();
     }
   }
-
+  //Cijfer vrijgeven via broker moesten spelers er niet in slagen om de reeks te vervolledigen.
+  if (String(topic) == "esp32/fitness/geforceerdCijfer")
+  {
+    if (messageTemp == "vrijgeven")
+    {
+      lcd.print(cijferSlotnummer);
+    }
+  }
   if (String(topic) == "esp32/fitness/OKmessage")
   {
-    if (messageTemp == "oefOK")
     {
-      oefeningJuist = true;
+      if (messageTemp == "oefOK")
+      {
+        oefeningJuist = true;
+      }
+      else
+        oefeningJuist = false;
     }
-    else
-      oefeningJuist = false;
   }
 
   if (String(topic) == "esp32/fitness/LCDmessage")
   {
     if (messageTemp == "juist") //serie juist
     {
-      boodschapLCD = "JUIST:)";
-      draw_progressbar(percent);
+      boodschapLCD = "JUIST:) ";
+      //draw_progressbar(percent);
       //cijfer alohomora vrijgeven
       lcd.setCursor(15, 0);
       lcd.print(cijferSlotnummer);
@@ -219,11 +218,24 @@ void callback(char *topic, byte *message, unsigned int length)
     }
     else if (messageTemp == "fout") //serie fout
     {
-      boodschapLCD = "FOUT!  ";
+      boodschapLCD = "FOUT!    ";
+      if ((percent - 10) > 0) // een foute beweging zal de batterij 10% laten afnemen
+      {
+        percent = percent - 10;
+      }
+      else
+      {
+        percent = 0;
+      }
     }
     else if (messageTemp == "meten")
     {
-      boodschapLCD = "METEN  ";
+      boodschapLCD = "METEN    ";
+    }
+
+    else if (messageTemp == "klaar")
+    {
+      boodschapLCD = "ZET KLAAR";
     }
     draw_progressbar(percent);
   }
@@ -242,16 +254,12 @@ void reconnect()
     {
       //passing the number for alohomara
       Serial.println("connected");
-      int getal = esp_random() % 9;
-      String nummer = (String)getal;
+      String nummer = (String)cijferSlotnummer;
       const char *nmr = nummer.c_str();
-      client.publish("esp32/Alohomora/code/1", nmr);
+      client.publish("esp32/alohomora/code1", nmr);
 
       // ... and resubscribe
       client.subscribe("esp32/fitness/#");
-      // client.subscribe("esp32/fitness/nmrOef");
-      // client.subscribe("esp32/fitness/control");
-      // client.subscribe("esp32/fitness/LCDmessage");
     }
     else
     {
@@ -262,7 +270,6 @@ void reconnect()
     }
   }
 }
-
 void setup()
 {
   Serial.begin(115200);
@@ -270,7 +277,18 @@ void setup()
   lcd.begin(LCD_NB_COLUMNS, LCD_NB_ROWS);
   lcd.clear();
   setup_progressbar();
-  telefoonGebeld = false;
+    //reset
+  // percent=0;
+  // oefeningNmr=0;
+  // telefoonGebeld = false;
+  // boolean oefeningJuist = false;
+  // boolean pauze = false; 
+  // boolean toestandVerzonden = false;
+  // String boodschapLCD = ".....";
+  // lastMillis = 0;
+  // currentMillis = 0;
+  // oefeningNmr = 0;
+  // cijferSlotnummer = esp_random() % 9;
 
   //Wifi
   setup_wifi();
@@ -288,6 +306,14 @@ void loop()
     reconnect();
   }
   client.loop();
+
+  //zolang geen reeksnummer ontvangen, request messages sturen
+  if (oefeningNmr == 0)
+  {
+    delay(3000);
+    client.publish("esp32/fitness/request", "request");
+    
+  }
 
   //'3' POWEROFF (stop voor fitness)
   if (percent == 0 && toestandVerzonden == false)
@@ -314,12 +340,12 @@ void loop()
     else
       percent = 100;
   }
-  //Als 10 seconden geen oefening juist dan zal batterij dalen
+  //Als 10 seconden geen oefening juist dan zal batterij 1% dalen
   currentMillis = millis();
   if (currentMillis - lastMillis > 10000 && percent > 0)
   {
     percent = percent - 1;
     lastMillis = millis();
   }
-  draw_progressbar(percent);
+  //draw_progressbar(percent);/////////////////////
 }

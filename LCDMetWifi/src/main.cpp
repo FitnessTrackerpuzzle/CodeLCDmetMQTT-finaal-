@@ -23,12 +23,13 @@ unsigned long currentMillis = 0;
 static int oefeningNmr = 0;
 static int cijferSlotnummer = esp_random() % 9;
 static byte percent = 0; // percentage van de batterij
-static int stap = 2;     //stapgrootte waarme batterij stijgt
+static int stap = 3;     //stapgrootte waarme batterij stijgt
 static boolean oefeningJuist = false;
 static boolean pauze = false; //boolean voor Afstand en ontsmetting.(false=> alles kan door gaan/True batterij wordt niet opgeladen)
 static boolean toestandVerzonden = false;
 static String boodschapLCD = "....."; //Geeft weer of oefening juist of fout is.
 static boolean telefoonGebeld = false;
+static boolean cijfergestuurd; //zo dat we maar 1 keer cijfer doorsturen
 
 //Blokjes op LCD vastleggen
 byte DIV_0_OF_5[8] = {
@@ -185,6 +186,7 @@ void callback(char *topic, byte *message, unsigned int length)
     if (messageTemp == "vrijgeven")
     {
       lcd.print(cijferSlotnummer);
+      draw_progressbar(percent);
     }
   }
   if (String(topic) == "esp32/fitness/OKmessage")
@@ -215,13 +217,14 @@ void callback(char *topic, byte *message, unsigned int length)
         client.publish("esp32/fitness/telefoon", "BEL");
         telefoonGebeld = true;
       }
+      draw_progressbar(percent);
     }
     else if (messageTemp == "fout") //serie fout
     {
       boodschapLCD = "FOUT!    ";
-      if ((percent - 10) > 0) // een foute beweging zal de batterij 10% laten afnemen
+      if ((percent - 5) > 0) // een foute beweging zal de batterij 10% laten afnemen
       {
-        percent = percent - 10;
+        percent = percent - 5;
       }
       else
       {
@@ -252,11 +255,7 @@ void reconnect()
     // Attempt to connect
     if (client.connect("ESP32fitness"))
     {
-      //passing the number for alohomara
       Serial.println("connected");
-      String nummer = (String)cijferSlotnummer;
-      const char *nmr = nummer.c_str();
-      client.publish("esp32/alohomora/code1", nmr);
 
       // ... and resubscribe
       client.subscribe("esp32/fitness/#");
@@ -277,28 +276,18 @@ void setup()
   lcd.begin(LCD_NB_COLUMNS, LCD_NB_ROWS);
   lcd.clear();
   setup_progressbar();
-    //reset
-  // percent=0;
-  // oefeningNmr=0;
-  // telefoonGebeld = false;
-  // boolean oefeningJuist = false;
-  // boolean pauze = false; 
-  // boolean toestandVerzonden = false;
-  // String boodschapLCD = ".....";
-  // lastMillis = 0;
-  // currentMillis = 0;
-  // oefeningNmr = 0;
-  // cijferSlotnummer = esp_random() % 9;
+
+  cijfergestuurd = false; //boolean zodat we maar 1 keer cijfer doorsturen
 
   //Wifi
   setup_wifi();
   client.setServer(MQTT_SERVER, MQTT_PORT);
   client.setCallback(callback);
+  draw_progressbar(percent);
 }
 
 void loop()
 {
-  draw_progressbar(percent);
 
   //loop voor wifi
   if (!client.connected())
@@ -307,24 +296,42 @@ void loop()
   }
   client.loop();
 
+  //passing the number for alohomara
+  Serial.print(cijfergestuurd);
+  if (cijfergestuurd == false)
+  {
+    Serial.print("Test");
+    cijfergestuurd = true;
+    String nummer = (String)cijferSlotnummer;
+    const char *nmr = nummer.c_str();
+    client.publish("esp32/alohomora/code1", nmr);
+  }
   //zolang geen reeksnummer ontvangen, request messages sturen
   if (oefeningNmr == 0)
   {
     delay(3000);
     client.publish("esp32/fitness/request", "request");
-    
+    draw_progressbar(percent);
   }
 
   //'3' POWEROFF (stop voor fitness)
   if (percent == 0 && toestandVerzonden == false)
   {
     client.publish("esp32/fitness/control", "3");
+    client.publish("esp32/vaccin/control", "3");
+    client.publish("esp32/morse/control", "3");
+    client.publish("esp32/5g/control", "3");
+
     toestandVerzonden = true;
   }
   //'4' POWERON(start voor fitness)
   if (percent > 0 && toestandVerzonden == true)
   {
     client.publish("esp32/fitness/control", "4");
+    client.publish("esp32/vaccin/control", "4");
+    client.publish("esp32/morse/control", "4");
+    client.publish("esp32/5g/control", "4");
+
     toestandVerzonden = false;
   }
 
@@ -338,14 +345,18 @@ void loop()
       percent = percent + stap;
     }
     else
+    {
       percent = 100;
+    }
+    draw_progressbar(percent);
   }
+
   //Als 10 seconden geen oefening juist dan zal batterij 1% dalen
   currentMillis = millis();
   if (currentMillis - lastMillis > 10000 && percent > 0)
   {
     percent = percent - 1;
     lastMillis = millis();
+    draw_progressbar(percent);
   }
-  //draw_progressbar(percent);/////////////////////
 }
